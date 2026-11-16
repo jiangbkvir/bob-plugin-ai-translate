@@ -1,0 +1,160 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: 测试与打包
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 语法检查
+        run: node --check main.js
+
+      - name: 运行协议测试
+        run: node --test tests/protocols.test.mjs
+
+      - name: 构建 Bob 插件
+        run: ./scripts/build.sh
+
+      - name: 校验安装包结构
+        run: |
+          set -euo pipefail
+          actual="$(unzip -Z1 dist/bob-plugin-ai-translate.bobplugin | sed '/^$/d' | sort)"
+          expected="$(printf '%s\n' info.json main.js prompts/ prompts/skill.md | sort)"
+          if [ "$actual" != "$expected" ]; then
+            printf '%s\n' "安装包根目录结构不正确" "实际：" "$actual" "期望：" "$expected"
+            exit 1
+          fi
+          echo "安装包结构校验通过。"
+
+      - name: 上传安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: bobplugin
+          path: dist/bob-plugin-ai-translate.bobplugin
+          if-no-files-found: error
+
+  cd:
+    name: 发布 Release
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 读取版本并检查发布状态
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./info.json').version")"
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+          tag_exists=false
+          release_exists=false
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            tag_exists=true
+          fi
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
+          if [ "${tag_exists}" = "true" ] && [ "${release_exists}" = "true" ]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "${tag} 的 tag 和 GitHub Release 均已存在，跳过发布。"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "准备发布 ${tag}（tag=${tag_exists}，release=${release_exists}）。"
+          fi
+
+      - name: 下载 CI 安装包
+        if: steps.version.outputs.should_release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: bobplugin
+          path: dist
+
+      - name: 更新 appcast.json
+        if: steps.version.outputs.should_release == 'true'
+        run: node scripts/prepare-release.mjs
+
+      - name: 提交安装包与 appcast
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add appcast.json dist/bob-plugin-ai-translate.bobplugin
+          if git diff --cached --quiet; then
+            echo "appcast.json 和安装包无变化。"
+          else
+            git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: 创建并推送 tag
+        if: steps.version.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "${tag} 已存在，跳过创建。"
+          else
+            git tag -a "${tag}" -m "Release ${tag}"
+            git push origin "${tag}"
+          fi
+
+      - name: 生成发布说明
+        if: steps.version.outputs.should_release == 'true'
+        run: node scripts/release-notes.mjs "${{ steps.version.outputs.version }}" .release-notes.md
+
+      - name: 创建 GitHub Release
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "${tag} 的 GitHub Release 已存在，跳过创建。"
+          else
+            gh release create "${tag}" \
+              dist/bob-plugin-ai-translate.bobplugin \
+              --verify-tag \
+              --title "${tag}" \
+              --notes-file .release-notes.md \
+              --latest
+          fi

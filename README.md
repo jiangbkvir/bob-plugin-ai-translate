@@ -170,22 +170,48 @@ dist/bob-plugin-ai-translate.bobplugin
 
 ### 发布新版本
 
-1. 修改 `info.json` 中的 `version`。
-2. 运行 `./scripts/build.sh`。
-3. 使用构建输出中的 SHA256 更新 `appcast.json`。
-4. 提交并推送代码。
-5. 创建对应版本的 GitHub Release，并上传 `dist/bob-plugin-ai-translate.bobplugin`。
+仓库通过 GitHub Actions 完成持续集成与持续发布：
+
+1. 修改 `info.json` 中的 `version`，并在 `CHANGELOG.md` 添加同版本条目。
+2. 在本地运行测试和构建：
+
+   ```sh
+   node --check main.js
+   node --test tests/protocols.test.mjs
+   ./scripts/build.sh
+   ```
+
+3. 提交 Pull Request 或直接合并到 `main`。CI 会自动运行测试、构建并校验安装包结构。
+4. `main` 推送通过 CI 后，CD 会自动：
+   - 根据安装包计算 SHA256
+   - 更新 `appcast.json`
+   - 提交安装包和 appcast
+   - 创建并推送 `vX.Y.Z` tag
+   - 创建同名 GitHub Release 并上传 `.bobplugin`
+5. 如果发布中断，可在 Actions 中重新运行工作流。工作流会分别检查 tag 和 Release，仅补齐缺失步骤。
+
+每个版本都必须同时存在 `vX.Y.Z` tag 和对应 GitHub Release，且 `appcast.json` 中的 SHA256 必须与 Release 安装包一致。不要手动修改 appcast 哈希或跳过版本号。
+
+### 发布到 Bob 插件源
+
+GitHub 仓库需添加 `bobplugin` topic。Bob 第三方插件列表会自动收录带该 topic 的仓库，并依据根目录的 `appcast.json` 检查更新，无需另行提交插件源 PR。
 
 ## 仓库结构
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml
 ├── appcast.json
+├── CHANGELOG.md
 ├── info.json
 ├── main.js
 ├── prompts/
 ├── scripts/
-│   └── build.sh
+│   ├── build.sh
+│   ├── prepare-release.mjs
+│   └── release-notes.mjs
 └── tests/
     └── protocols.test.mjs
 ```
