@@ -25,11 +25,7 @@
 
 如果安装过旧版插件，建议先在 Bob 中移除旧插件，再安装新版本。
 
-也可以直接下载仓库内的安装包：
-
-```text
-https://github.com/jiangbkvir/bob-plugin-ai-translate/raw/main/dist/bob-plugin-ai-translate.bobplugin
-```
+安装包只发布在 GitHub Releases 中，仓库不跟踪构建产物。
 
 ## Bob 版本兼容性
 
@@ -185,7 +181,7 @@ dist/bob-plugin-ai-translate.bobplugin
 4. `main` 推送通过 CI 后，CD 会自动：
    - 根据安装包计算 SHA256
    - 更新 `appcast.json`
-   - 提交安装包和 appcast
+   - 提交 appcast
    - 创建并推送 `vX.Y.Z` tag
    - 创建同名 GitHub Release 并上传 `.bobplugin`
 5. 如果发布中断，可在 Actions 中重新运行工作流。工作流会分别检查 tag 和 Release，仅补齐缺失步骤。

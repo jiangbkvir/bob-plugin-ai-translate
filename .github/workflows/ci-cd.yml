@@ -111,15 +111,15 @@ jobs:
         if: steps.version.outputs.should_release == 'true'
         run: node scripts/prepare-release.mjs
 
-      - name: 提交安装包与 appcast
+      - name: 提交 appcast
         if: steps.version.outputs.should_release == 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add appcast.json dist/bob-plugin-ai-translate.bobplugin
+          git add appcast.json
           if git diff --cached --quiet; then
-            echo "appcast.json 和安装包无变化。"
+            echo "appcast.json 无变化。"
           else
             git commit -m "chore(release): v${{ steps.version.outputs.version }} [skip ci]"
             git push origin HEAD:main
